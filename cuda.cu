@@ -14,7 +14,7 @@ int num_cluster;
 int dims;
 string inputfilename;
 int max_num_iter;
-double threshold;
+float threshold;
 bool flag;
 unsigned int seed = 8675309;
 
@@ -27,34 +27,7 @@ int kmeans_rand() {
 void kmeans_srand(unsigned int funcseed) {
     nextstd = funcseed;
 }
-
-void findNearestCentroids(int labels[], double dataset[], double centroids[]){
-    for(int i = 0; i < n;i++){
-		labels[i] = 0;
-        int label = 0;
-        double dist=0;
-        double running = 0;
-        for(int k = 0; k < dims; k++){
-            running += pow(dataset[i*dims+k]-centroids[0*dims+k],2);
-        }
-        running = sqrt(running);
-        dist = running;
-        for(int j = 1; j < num_cluster; j++){
-            double inner = 0;
-            for(int k = 0; k < dims; k++){
-                inner += pow(dataset[i*dims+k]-centroids[j*dims+k],2);
-            }
-            inner = sqrt(inner);
-            if(inner < dist){
-               label = j;
-               dist = inner;
-            }
-        }
-		labels[i] = label;
-        //labels.push_back(label);
-    }
-}
-void randomCentroids(double centroids[],double dataset[]){
+void randomCentroids(float centroids[],float dataset[]){
 	int count = 0;
     for (int i=0; i<num_cluster; i++){
         int index = kmeans_rand() % n;
@@ -65,13 +38,44 @@ void randomCentroids(double centroids[],double dataset[]){
         }
     }
 }
-void zeroArray(double centroids[]){
+
+__global__ void findNearestCentroids(int* labels, float* dataset, float* centroids, int* n, int* dims, int* num_cluster){
+    //for(int i = 0; i < n;i++){
+		int i = threadIdx.x + blockIdx.x * blockDim.x;
+		if(i >= *n){
+			return;
+		}
+		labels[i] = 0;
+        int label = 0;
+        float dist=0;
+        float running = 0;
+        for(int k = 0; k < *dims; k++){
+            running += pow(dataset[i*(*dims)+k]-centroids[0*(*dims)+k],2);
+        }
+        running = sqrt(running);
+        dist = running;
+        for(int j = 1; j < *num_cluster; j++){
+            float inner = 0;
+            for(int k = 0; k < *dims; k++){
+                inner += pow(dataset[i*(*dims)+k]-centroids[j*(*dims)+k],2);
+            }
+            inner = sqrt(inner);
+            if(inner < dist){
+               label = j;
+               dist = inner;
+            }
+        }
+		labels[i] = label;
+}
+void zeroArray(float centroids[]){
 	for(int i = 0; i < num_cluster*dims;i++){
 		centroids[i] = 0;
 	}
 }
-void averageLabeledCentroids(double newcentroids[], double dataset[], int labels[]){
-	double labelcounts[num_cluster]={0};
+
+
+void averageLabeledCentroids(float newcentroids[], float dataset[], int labels[]){
+	float labelcounts[num_cluster]={0};
    for(int i = 0; i < n; i++){
        labelcounts[labels[i]] = labelcounts[labels[i]]+1;
        for(int j = 0; j < dims; j++){
@@ -85,38 +89,114 @@ void averageLabeledCentroids(double newcentroids[], double dataset[], int labels
        }
    }
 }
-bool converged(double oldCentroids[], double newCentroids[]){
-	for(int i = 0; i < num_cluster*dims; i++){
-		if(!(abs(oldCentroids[i] - newCentroids[i]) < threshold)){
-			return false;
+
+__global__ void converged(float* oldCentroids, float* newCentroids, int* convergedFlag, float* threshold,int* plz){
+		int i = threadIdx.x + blockIdx.x * blockDim.x;
+		if(i >= *plz){
+			return;
 		}
-	}
-	return true;
+		if(!(abs(oldCentroids[i] - newCentroids[i]) < *threshold)){
+			atomicAdd(convergedFlag, 1);
+		}
 }
-void kmeans(double dataset[]){
-	double centroids[num_cluster*dims]={0};
+void kmeans(float dataset[]){
+	float centroids[num_cluster*dims]={0};
 	int labels[n]={0};
     randomCentroids(centroids, dataset);
     int iterations = 0;
     bool done = false;
-	double totalduration = 0;
+	float totalduration = 0;
+	//
+	//DEVICE ARRAYS
+	//
+	float *d_centroids;
+	float *d_oldCentroids;
+	float* d_dataset;
+	int *d_labels;
+	int csize = num_cluster*dims*sizeof(float);
+	int dsize = n*dims*sizeof(float);
+	int lsize = n*sizeof(int);
+	cudaMalloc((void **)&d_centroids, csize);
+	cudaMalloc((void **)&d_oldCentroids, csize);
+	cudaMalloc((void **)&d_dataset, dsize);
+	cudaMalloc((void **)&d_labels, lsize);
+	//
+	//DEVICE VARIABLES
+	//
+	int* d_n;
+	int* d_dims;
+	int* d_num_cluster;
+	cudaMalloc((void **)&d_n, sizeof(int));
+	cudaMalloc((void **)&d_dims, sizeof(int));
+	cudaMalloc((void **)&d_num_cluster, sizeof(int));
+	cudaMemcpy(d_n, &n, sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_dims, &dims, sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_num_cluster, &num_cluster, sizeof(int), cudaMemcpyHostToDevice);
+	//
+	//CONVERGE VARIABLES
+	//
+	int convergedFlag = 0;
+	int* d_convergedFlag;
+	cudaMalloc((void **) &d_convergedFlag, sizeof(int));
+
+	float* d_threshold;
+	cudaMalloc((void**)&d_threshold, sizeof(float));
+	cudaMemcpy(d_threshold, &threshold, sizeof(float), cudaMemcpyHostToDevice);
+
+	int plz = num_cluster*dims;
+	int* d_plz;
+	cudaMalloc((void **) &d_plz, sizeof(int));
+	cudaMemcpy(d_plz, &plz, sizeof(int), cudaMemcpyHostToDevice);
     while(!done){
 		auto start = high_resolution_clock::now();
-		double oldCentroids[num_cluster*dims]={0};
-        //vector<double> oldCentroids;
+		float oldCentroids[num_cluster*dims]={0};
+        //vector<float> oldCentroids;
         for(int i = 0; i < num_cluster*dims; i++){
 			oldCentroids[i] = centroids[i];
         }
         iterations++;
-        findNearestCentroids(labels,dataset,centroids);
+		//
+		//FIND NEAREST CENTROIDS
+		//
+		cudaMemcpy(d_centroids, centroids, csize, cudaMemcpyHostToDevice);
+		cudaMemcpy(d_labels, labels, lsize, cudaMemcpyHostToDevice);
+		cudaMemcpy(d_dataset, dataset, dsize, cudaMemcpyHostToDevice);
+		int blockSize;
+		int minGridSize;
+		int gridSize;
+		cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, (void*) findNearestCentroids, 0, n);
+		gridSize = (n+blockSize-1)/blockSize;
+		findNearestCentroids<<<gridSize, blockSize>>>(d_labels,d_dataset,d_centroids, d_n, d_dims, d_num_cluster);
+		cudaDeviceSynchronize();
+		cudaMemcpy(labels, d_labels, lsize, cudaMemcpyDeviceToHost);
+		//
+		//AVERAGE LABELED CENTROIDS
+		//
+		//not worrying about parallelizing this bc massive improvement(7 times) parallelizing other work (findNearestCentroids and converged) and is the same concept repeated
+		//latitude in parallelzing work as necessary
 		zeroArray(centroids);
-        averageLabeledCentroids(centroids,dataset,labels);
-        done = (iterations == max_num_iter || converged(centroids, oldCentroids));
+		averageLabeledCentroids(centroids,dataset,labels);
+		//
+		// CONVERGE CENTROIDS
+		//
+		convergedFlag = 0;
+		cudaMemcpy(d_convergedFlag, &convergedFlag, sizeof(int), cudaMemcpyHostToDevice);
+		cudaMemcpy(d_centroids, centroids, csize, cudaMemcpyHostToDevice);
+		cudaMemcpy(d_oldCentroids, oldCentroids, csize, cudaMemcpyHostToDevice);
+		cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, (void*) converged, 0, num_cluster*dims);
+		gridSize = (n+blockSize-1)/blockSize;
+		converged<<<gridSize, blockSize>>>(d_centroids, d_oldCentroids, d_convergedFlag,d_threshold,d_plz);
+		cudaDeviceSynchronize();
+		cudaMemcpy(&convergedFlag, d_convergedFlag, sizeof(int), cudaMemcpyDeviceToHost);
+        done = (iterations == max_num_iter || convergedFlag == 0);
 		auto stop = high_resolution_clock::now();
-		double duration = duration_cast<microseconds>(stop - start).count(); 
+		float duration = duration_cast<microseconds>(stop - start).count(); 
 		totalduration += duration;
     }
-	double time_per_iter_in_ms = totalduration/iterations;
+	cudaFree(d_centroids); cudaFree(d_labels); cudaFree(d_dataset),cudaFree(d_oldCentroids);
+	cudaFree(d_n); cudaFree(d_dims); cudaFree(d_num_cluster), cudaFree(d_convergedFlag),cudaFree(d_threshold),cudaFree(d_plz);
+
+	float time_per_iter_in_ms = totalduration/iterations;
 	auto iter_to_converge = iterations;
 	printf("%d,%lf\n", iter_to_converge, time_per_iter_in_ms);
 	if(flag){
@@ -168,7 +248,7 @@ int main(int argc, char* argv[]){
     string stringn;
     getline(inputfile, stringn);
     n = stoi(stringn);
-	double dataset[n*dims]={0};
+	float dataset[n*dims]={0};
 	int count = 0;
     for(int i = 0; i < n; i++){
         string line;
