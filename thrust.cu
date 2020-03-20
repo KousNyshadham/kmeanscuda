@@ -204,7 +204,7 @@ void kmeans(){
 		int sum = thrust::reduce(convergedVector.begin(), convergedVector.end(), (int) 0, thrust::plus<int>());
         done = (iterations == max_num_iter || sum == 0);
 		auto stop = high_resolution_clock::now();
-		float duration = duration_cast<microseconds>(stop - start).count(); 
+		float duration = duration_cast<milliseconds>(stop - start).count(); 
 		totalduration += duration;
 		hostcentroids=centroids;
 		hostlabels=unsortedlabels;

@@ -105,7 +105,7 @@ void kmeans(){
         centroids = averageLabeledCentroids();
         done = (iterations == max_num_iter || converged(centroids, oldCentroids));
 		auto stop = high_resolution_clock::now();
-		double duration = duration_cast<microseconds>(stop - start).count(); 
+		double duration = duration_cast<milliseconds>(stop - start).count(); 
 		totalduration += duration;
     }
 	double time_per_iter_in_ms = totalduration/iterations;

@@ -160,7 +160,7 @@ void kmeans(float dataset[]){
 		converged(centroids,oldCentroids, &convergedFlag);
         done = (iterations == max_num_iter || convergedFlag==0);
 		auto stop = high_resolution_clock::now();
-		float duration = duration_cast<microseconds>(stop - start).count(); 
+		float duration = duration_cast<milliseconds>(stop - start).count(); 
 		totalduration += duration;
     }
 	cudaFree(d_centroids); cudaFree(d_labels); cudaFree(d_dataset);
