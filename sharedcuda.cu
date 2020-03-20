@@ -27,22 +27,28 @@ int kmeans_rand() {
 void kmeans_srand(unsigned int funcseed) {
     nextstd = funcseed;
 }
-
-void findNearestCentroids(int labels[], float dataset[], float centroids[]){
-    for(int i = 0; i < n;i++){
+__global__ void findNearestCentroids(int* labels, float* dataset, float* centroids, int* n, int* dims, int* num_cluster){
+    //for(int i = 0; i < n;i++){
+		extern __shared__ int s[];
+		int i = threadIdx.x + blockIdx.x * blockDim.x;
+		int si = threadIdx.x;
+		s[si] = labels[i];
+		if(i >= *n){
+			return;
+		}
 		labels[i] = 0;
         int label = 0;
         float dist=0;
         float running = 0;
-        for(int k = 0; k < dims; k++){
-            running += pow(dataset[i*dims+k]-centroids[0*dims+k],2);
+        for(int k = 0; k < *dims; k++){
+            running += pow(dataset[i*(*dims)+k]-centroids[0*(*dims)+k],2);
         }
         running = sqrt(running);
         dist = running;
-        for(int j = 1; j < num_cluster; j++){
+        for(int j = 1; j < *num_cluster; j++){
             float inner = 0;
-            for(int k = 0; k < dims; k++){
-                inner += pow(dataset[i*dims+k]-centroids[j*dims+k],2);
+            for(int k = 0; k < *dims; k++){
+                inner += pow(dataset[i*(*dims)+k]-centroids[j*(*dims)+k],2);
             }
             inner = sqrt(inner);
             if(inner < dist){
@@ -50,9 +56,9 @@ void findNearestCentroids(int labels[], float dataset[], float centroids[]){
                dist = inner;
             }
         }
-		labels[i] = label;
-        //labels.push_back(label);
-    }
+		s[si] = label;
+		labels[i] = s[si];
+
 }
 void randomCentroids(float centroids[],float dataset[]){
 	int count = 0;
@@ -99,6 +105,30 @@ void kmeans(float dataset[]){
     int iterations = 0;
     bool done = false;
 	float totalduration = 0;
+	//
+	//DEVICE ARRAYS
+	//
+	float *d_centroids;
+	float* d_dataset;
+	int *d_labels;
+	int csize = num_cluster*dims*sizeof(float);
+	int dsize = n*dims*sizeof(float);
+	int lsize = n*sizeof(int);
+	cudaMalloc((void **)&d_centroids, csize);
+	cudaMalloc((void **)&d_dataset, dsize);
+	cudaMalloc((void **)&d_labels, lsize);
+	//
+	//DEVICE VARIABLES
+	//
+	int* d_n;
+	int* d_dims;
+	int* d_num_cluster;
+	cudaMalloc((void **)&d_n, sizeof(int));
+	cudaMalloc((void **)&d_dims, sizeof(int));
+	cudaMalloc((void **)&d_num_cluster, sizeof(int));
+	cudaMemcpy(d_n, &n, sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_dims, &dims, sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_num_cluster, &num_cluster, sizeof(int), cudaMemcpyHostToDevice);
     while(!done){
 		auto start = high_resolution_clock::now();
 		float oldCentroids[num_cluster*dims]={0};
@@ -107,7 +137,23 @@ void kmeans(float dataset[]){
 			oldCentroids[i] = centroids[i];
         }
         iterations++;
-        findNearestCentroids(labels,dataset,centroids);
+		//
+		//FIND NEAREST CENTROIDS
+		//
+		cudaMemcpy(d_centroids, centroids, csize, cudaMemcpyHostToDevice);
+		cudaMemcpy(d_labels, labels, lsize, cudaMemcpyHostToDevice);
+		cudaMemcpy(d_dataset, dataset, dsize, cudaMemcpyHostToDevice);
+		int blockSize;
+		int minGridSize;
+		int gridSize;
+		cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, (void*) findNearestCentroids, 0, n);
+		gridSize = (n+blockSize-1)/blockSize;
+		findNearestCentroids<<<gridSize, blockSize, blockSize*sizeof(int)>>>(d_labels,d_dataset,d_centroids, d_n, d_dims, d_num_cluster);
+		cudaDeviceSynchronize();
+		cudaMemcpy(labels, d_labels, lsize, cudaMemcpyDeviceToHost);
+		//
+		//AVERAGE LABELED CENTROIDS
+		//
 		zeroArray(centroids);
         averageLabeledCentroids(centroids,dataset,labels);
 		int convergedFlag = 0;
@@ -117,6 +163,8 @@ void kmeans(float dataset[]){
 		float duration = duration_cast<microseconds>(stop - start).count(); 
 		totalduration += duration;
     }
+	cudaFree(d_centroids); cudaFree(d_labels); cudaFree(d_dataset);
+	cudaFree(d_n); cudaFree(d_dims); cudaFree(d_num_cluster);
 	float time_per_iter_in_ms = totalduration/iterations;
 	auto iter_to_converge = iterations;
 	printf("%d,%lf\n", iter_to_converge, time_per_iter_in_ms);
