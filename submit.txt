@@ -62,8 +62,8 @@
 # Specification for sequential implementation of kmeans
 #
 [Sequential]
-How_To_Compile:
-Executable:
+How_To_Compile: g++ sequential.cpp -o sequential
+Executable: ./sequential
 Extra_Args:
 
 #
@@ -71,8 +71,8 @@ Extra_Args:
 # using Thrust
 #
 [Thrust]
-How_To_Compile:
-Executable:
+How_To_Compile: nvcc thrust.cu -o thrust 
+Executable: ./thrust
 Extra_Args:
 
 #
@@ -80,8 +80,8 @@ Extra_Args:
 # using CUDA
 #
 [CUDA basic]
-How_To_Compile:
-Executable:
+How_To_Compile: nvcc cuda.cu -o cuda
+Executable: ./cuda
 Extra_Args:
 
 #
@@ -89,8 +89,8 @@ Extra_Args:
 # using Shared Memory
 #
 [CUDA shared]
-How_To_Compile:
-Executable:
+How_To_Compile: nvcc sharedcuda.cu -o sharedcuda
+Executable: ./sharedcuda
 Extra_Args:
 
 #
